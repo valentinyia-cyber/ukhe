@@ -1,0 +1,586 @@
+
+  ___  ____  ____  ____  ____ ®
+ /__    /   ____/   /   ____/      StataNow 19.5
+___/   /   /___/   /   /___/       MP—Parallel Edition
+
+ Statistics and Data Science       Copyright 1985-2025 StataCorp LLC
+                                   StataCorp
+                                   4905 Lakeway Drive
+                                   College Station, Texas 77845 USA
+                                   800-782-8272        https://www.stata.com
+                                   979-696-4600        service@stata.com
+
+Stata license: Single-user 2-core , expiring  6 Jun 2028
+Serial number: 501909304107
+  Licensed to: Akos Valentinyi
+               University of Manchester
+
+Notes:
+      1. Stata is running in batch mode.
+      2. Unicode is supported; see help unicode_advice.
+      3. More than 2 billion observations are allowed; see help obs_advice.
+      4. Maximum number of variables is set to 5,000 but can be increased;
+          see help set_maxvar.
+
+. do /Users/user/Codes/ukhe/scripts/hesa_convert_csv_to_dta.do 
+
+. version 16.0
+
+. clear all
+
+. set more off
+
+. 
+. * ---------------------------------------------------------------
+. * Convert local HESA CSV tables to Stata DTA files.
+. *
+. * - One DTA file is created per HESA table.
+. * - Year-split table folders are appended before saving.
+. * - Provider-level HESA rows are restricted to REF2021 institutions
+. *   with submissions in more than one Unit of Assessment.
+. * ---------------------------------------------------------------
+. 
+. local hesa_dir "/Users/user/Dropbox/Akos/ukhe_data/hesa"
+
+. local csv_dir "`hesa_dir'/csv"
+
+. local ref_dir "/Users/user/Dropbox/Akos/ukhe_data/ref2021"
+
+. local out_dir "`hesa_dir'/dta"
+
+. capture mkdir "`out_dir'"
+
+. global hesa_csv_dir "`csv_dir'"
+
+. 
+. tempfile ref2021_multi_uoa
+
+. global ref2021_multi_uoa_file "`ref2021_multi_uoa'"
+
+. 
+. * Prefer the already-created REF2021 institution x UoA file.
+. capture confirm file "`ref_dir'/ref2021_uoa_indicators.dta"
+
+. if !_rc {
+.     use "`ref_dir'/ref2021_uoa_indicators.dta", clear
+.     keep ukprn institution_name uoa_number
+. }
+
+. else {
+.     capture confirm file "`ref_dir'/ref2021_results_all.xlsx"
+.     if _rc {
+.         di as error "Missing REF2021 source file:"
+.         di as error "  `ref_dir'/ref2021_uoa_indicators.dta"
+.         di as error "  `ref_dir'/ref2021_results_all.xlsx"
+.         exit 601
+.     }
+. 
+.     import excel using "`ref_dir'/ref2021_results_all.xlsx", sheet("Sheet1") 
+> clear
+.     rename A ukprn
+.     rename B institution_name
+.     rename E uoa_number
+.     rename J profile
+. 
+.     drop if ukprn == "Institution code (UKPRN)"
+.     keep if profile == "Overall"
+.     destring ukprn uoa_number, replace ignore(",") force
+.     keep ukprn institution_name uoa_number
+. }
+
+. 
+. keep if !missing(ukprn) & !missing(uoa_number)
+(0 observations deleted)
+
+. duplicates drop ukprn uoa_number, force
+
+Duplicates in terms of ukprn uoa_number
+
+(0 observations are duplicates)
+
+. bysort ukprn: gen n_ref2021_uoas = _N
+
+. bysort ukprn (institution_name): keep if _n == 1
+(1,710 observations deleted)
+
+. keep if n_ref2021_uoas > 1
+(28 observations deleted)
+
+. rename institution_name ref2021_institution_name
+
+. keep ukprn ref2021_institution_name n_ref2021_uoas
+
+. compress
+  variable n_ref2021_uoas was float now byte
+  (387 bytes saved)
+
+. save "`ref2021_multi_uoa'", replace
+(file /var/folders/ch/kb7x45ys2fq6dcpfs379ph280000gp/T//St18749.000001 not
+    found)
+file /var/folders/ch/kb7x45ys2fq6dcpfs379ph280000gp/T//St18749.000001 saved
+    as .dta format
+
+. 
+. capture program drop import_hesa_csv
+
+. program define import_hesa_csv
+  1.     syntax using/, TABLE(integer) SHORTNAME(string) [FILTER]
+  2. 
+.     local headerrow 0
+  3.     local lineno 0
+  4.     file open hesa_fh using "`using'", read text
+  5.     file read hesa_fh line
+  6.     while r(eof) == 0 {
+  7.         local lineno = `lineno' + 1
+  8.         if strpos(`"`line'"', "UKPRN,") == 1 | strpos(`"`line'"', "Categor
+> y marker,") == 1 {
+  9.             local headerrow `lineno'
+ 10.             continue, break
+ 11.         }
+ 12.         file read hesa_fh line
+ 13.     }
+ 14.     file close hesa_fh
+ 15. 
+.     if `headerrow' == 0 {
+ 16.         di as error "Could not find a HESA header row in `using'"
+ 17.         exit 459
+ 18.     }
+ 19. 
+.     import delimited using "`using'", varnames(`headerrow') stringcols(_all) 
+> clear ///
+>         bindquote(strict) encoding("UTF-8")
+ 20. 
+.     foreach v in number value value000s value_000s valueratio value_ratio num
+> bervalue number_value {
+ 21.         capture confirm string variable `v'
+ 22.         if !_rc {
+ 23.             quietly replace `v' = ustrtrim(itrim(`v'))
+ 24.             quietly replace `v' = "" if `v' == "."
+ 25.             quietly replace `v' = "-" + regexs(1) if regexm(`v', "^\(([0-9
+> ][0-9,]*\.?[0-9]*)\)$")
+ 26.             capture destring `v', replace ignore(",")
+ 27.         }
+ 28.     }
+ 29. 
+.     local academic_year_var ""
+ 30.     foreach v in academicyear academiyear academic_year {
+ 31.         capture confirm variable `v'
+ 32.         if !_rc & "`academic_year_var'" == "" {
+ 33.             local academic_year_var "`v'"
+ 34.         }
+ 35.     }
+ 36.     if "`academic_year_var'" != "" {
+ 37.         capture confirm string variable `academic_year_var'
+ 38.         if !_rc {
+ 39.             quietly replace `academic_year_var' = ustrtrim(itrim(`academic
+> _year_var'))
+ 40.         }
+ 41.         gen int year = real(substr(`academic_year_var', 1, 4))
+ 42.         label variable year "Academic year start year"
+ 43.     }
+ 44. 
+.     gen int hesa_table = `table'
+ 45.     gen str40 hesa_short_name = "`shortname'"
+ 46.     local source_file "`using'"
+ 47.     local csv_prefix "$hesa_csv_dir/"
+ 48.     local prefix_len = strlen("`csv_prefix'")
+ 49.     if substr("`source_file'", 1, `prefix_len') == "`csv_prefix'" {
+ 50.         local source_file = "csv/" + substr("`source_file'", `prefix_len' 
+> + 1, .)
+ 51.     }
+ 52.     gen strL hesa_source_file = "`source_file'"
+ 53. 
+.     capture confirm variable ukprn
+ 54.     if !_rc {
+ 55.         capture confirm string variable ukprn
+ 56.         if !_rc {
+ 57.             quietly replace ukprn = ustrtrim(itrim(ukprn))
+ 58.             destring ukprn, replace ignore(",") force
+ 59.         }
+ 60. 
+.         merge m:1 ukprn using "$ref2021_multi_uoa_file", keep(match) nogen
+ 61.         gen byte ref2021_filter_applied = 1
+ 62.         label variable ref2021_filter_applied "Rows restricted to REF2021 
+> institutions with >1 UoA"
+ 63.     }
+ 64.     else {
+ 65.         gen byte ref2021_filter_applied = 0
+ 66.         label variable ref2021_filter_applied "No UKPRN in source CSV; REF
+> 2021 filter not applied"
+ 67.         di as error "Warning: no UKPRN column in `using'; saved without RE
+> F2021 provider filtering."
+ 68.     }
+ 69. 
+.     capture order ukprn ref2021_institution_name n_ref2021_uoas
+ 70.     order hesa_table hesa_short_name hesa_source_file ref2021_filter_appli
+> ed, last
+ 71.     compress
+ 72. end
+
+. 
+. local tables "1 6 7 8 11 12 13 14"
+
+. 
+. local short_1  "students"
+
+. local short_6  "tuition_fees"
+
+. local short_7  "income"
+
+. local short_8  "expenditure"
+
+. local short_11 "staff_fte"
+
+. local short_12 "staff_costs"
+
+. local short_13 "severance"
+
+. local short_14 "kfi"
+
+. 
+. local sort_1  "ukprn levelofstudy modeofstudy categorymarker category year"
+
+. local sort_6  "ukprn tuitionfeesandeducationcontracts v9 year"
+
+. local sort_7  "ukprn categorymarker category year"
+
+. local sort_8  "ukprn hesacostcentre academicdepartments activity year"
+
+. local sort_11 "ukprn contractmarker categorymarker category year"
+
+. local sort_12 "ukprn staffcosts unit year"
+
+. local sort_13 "ukprn categorymarker category year"
+
+. local sort_14 "ukprn kfiratiotitle year"
+
+. 
+. local order_1  "modeofstudy categorymarker category year"
+
+. local order_6  "year"
+
+. local order_7  "year"
+
+. local order_8  "year"
+
+. local order_11 "year"
+
+. local order_12 "staffcosts unit year"
+
+. local order_13 "categorymarker category year"
+
+. local order_14 "kfiratiotitle year"
+
+. 
+. local value_source_1  "number"
+
+. local value_source_6  "value000s"
+
+. local value_source_7  "value000s"
+
+. local value_source_8  "value000s"
+
+. local value_source_11 "number"
+
+. local value_source_12 "numbervalue"
+
+. local value_source_13 "value000s"
+
+. local value_source_14 "valueratio"
+
+. 
+. foreach t of local tables {
+  2.     local short "`short_`t''"
+  3.     local table_id : display %02.0f `t'
+  4. 
+.     if inlist(`t', 1, 8, 11) {
+  5.         local table_dir "`csv_dir'/table-`t'"
+  6.         local files : dir "`table_dir'" files "*.csv"
+  7.     }
+  8.     else {
+  9.         local table_dir "`csv_dir'"
+ 10.         local files "table-`t'.csv"
+ 11.     }
+ 12. 
+.     local first 1
+ 13.     tempfile combined
+ 14. 
+.     foreach f of local files {
+ 15.         local csv_path "`table_dir'/`f'"
+ 16.         di as text "Importing HESA table `t': `csv_path'"
+ 17.         quietly import_hesa_csv using "`csv_path'", table(`t') shortname("
+> `short'") filter
+ 18. 
+.         if `first' {
+ 19.             save "`combined'", replace
+ 20.             local first 0
+ 21.         }
+ 22.         else {
+ 23.             append using "`combined'"
+ 24.             save "`combined'", replace
+ 25.         }
+ 26.     }
+ 27. 
+.     if `first' {
+ 28.         di as error "No CSV files found for HESA table `t'"
+ 29.         continue
+ 30.     }
+ 31. 
+.     use "`combined'", clear
+ 32.     local value_source "`value_source_`t''"
+ 33.     capture confirm variable `value_source'
+ 34.     if !_rc {
+ 35.         rename `value_source' value
+ 36.     }
+ 37.     else {
+ 38.         local allvars : varlist _all
+ 39.         local has_value : list posof "value" in allvars
+ 40.         if !`has_value' {
+ 41.             di as error "Expected value source variable `value_source' for
+>  HESA table `t'"
+ 42.             exit 111
+ 43.         }
+ 44.     }
+ 45.     label variable value "Value"
+ 46. 
+.     foreach v of local sort_`t' {
+ 47.         capture confirm variable `v'
+ 48.         if _rc {
+ 49.             di as error "Expected sort variable `v' for HESA table `t'"
+ 50.             exit 111
+ 51.         }
+ 52.     }
+ 53. 
+.     order `order_`t'', before(academicyear)
+ 54.     sort `sort_`t''
+ 55.     label data "HESA table `t' (`short'), converted from CSV"
+ 56.     save "`out_dir'/T`table_id'_`short'.dta", replace
+ 57. 
+.     count
+ 58.     di as result "Saved `r(N)' rows: `out_dir'/T`table_id'_`short'.dta"
+ 59. }
+Importing HESA table 1: /Users/user/Dropbox/Akos/ukhe_data/hesa/csv/table-1/tab
+> le-1-(2019-20).csv
+(file /var/folders/ch/kb7x45ys2fq6dcpfs379ph280000gp/T//St18749.000002 not
+    found)
+file /var/folders/ch/kb7x45ys2fq6dcpfs379ph280000gp/T//St18749.000002 saved
+    as .dta format
+Importing HESA table 1: /Users/user/Dropbox/Akos/ukhe_data/hesa/csv/table-1/tab
+> le-1-(2022-23).csv
+file /var/folders/ch/kb7x45ys2fq6dcpfs379ph280000gp/T//St18749.000002 saved
+    as .dta format
+Importing HESA table 1: /Users/user/Dropbox/Akos/ukhe_data/hesa/csv/table-1/tab
+> le-1-(2014-15).csv
+file /var/folders/ch/kb7x45ys2fq6dcpfs379ph280000gp/T//St18749.000002 saved
+    as .dta format
+Importing HESA table 1: /Users/user/Dropbox/Akos/ukhe_data/hesa/csv/table-1/tab
+> le-1-(2021-22).csv
+file /var/folders/ch/kb7x45ys2fq6dcpfs379ph280000gp/T//St18749.000002 saved
+    as .dta format
+Importing HESA table 1: /Users/user/Dropbox/Akos/ukhe_data/hesa/csv/table-1/tab
+> le-1-(2017-18).csv
+file /var/folders/ch/kb7x45ys2fq6dcpfs379ph280000gp/T//St18749.000002 saved
+    as .dta format
+Importing HESA table 1: /Users/user/Dropbox/Akos/ukhe_data/hesa/csv/table-1/tab
+> le-1-(2023-24).csv
+file /var/folders/ch/kb7x45ys2fq6dcpfs379ph280000gp/T//St18749.000002 saved
+    as .dta format
+Importing HESA table 1: /Users/user/Dropbox/Akos/ukhe_data/hesa/csv/table-1/tab
+> le-1-(2020-21).csv
+file /var/folders/ch/kb7x45ys2fq6dcpfs379ph280000gp/T//St18749.000002 saved
+    as .dta format
+Importing HESA table 1: /Users/user/Dropbox/Akos/ukhe_data/hesa/csv/table-1/tab
+> le-1-(2016-17).csv
+file /var/folders/ch/kb7x45ys2fq6dcpfs379ph280000gp/T//St18749.000002 saved
+    as .dta format
+Importing HESA table 1: /Users/user/Dropbox/Akos/ukhe_data/hesa/csv/table-1/tab
+> le-1-(2018-19).csv
+file /var/folders/ch/kb7x45ys2fq6dcpfs379ph280000gp/T//St18749.000002 saved
+    as .dta format
+Importing HESA table 1: /Users/user/Dropbox/Akos/ukhe_data/hesa/csv/table-1/tab
+> le-1-(2024-25).csv
+file /var/folders/ch/kb7x45ys2fq6dcpfs379ph280000gp/T//St18749.000002 saved
+    as .dta format
+Importing HESA table 1: /Users/user/Dropbox/Akos/ukhe_data/hesa/csv/table-1/tab
+> le-1-(2015-16).csv
+file /var/folders/ch/kb7x45ys2fq6dcpfs379ph280000gp/T//St18749.000002 saved
+    as .dta format
+file /Users/user/Dropbox/Akos/ukhe_data/hesa/dta/T01_students.dta saved
+  4,880,610
+Saved 4880610 rows: /Users/user/Dropbox/Akos/ukhe_data/hesa/dta/T01_students.dt
+> a
+Importing HESA table 6: /Users/user/Dropbox/Akos/ukhe_data/hesa/csv/table-6.csv
+(file /var/folders/ch/kb7x45ys2fq6dcpfs379ph280000gp/T//St18749.000003 not
+    found)
+file /var/folders/ch/kb7x45ys2fq6dcpfs379ph280000gp/T//St18749.000003 saved
+    as .dta format
+file /Users/user/Dropbox/Akos/ukhe_data/hesa/dta/T06_tuition_fees.dta saved
+  433,100
+Saved 433100 rows: /Users/user/Dropbox/Akos/ukhe_data/hesa/dta/T06_tuition_fees
+> .dta
+Importing HESA table 7: /Users/user/Dropbox/Akos/ukhe_data/hesa/csv/table-7.csv
+(file /var/folders/ch/kb7x45ys2fq6dcpfs379ph280000gp/T//St18749.000004 not
+    found)
+file /var/folders/ch/kb7x45ys2fq6dcpfs379ph280000gp/T//St18749.000004 saved
+    as .dta format
+file /Users/user/Dropbox/Akos/ukhe_data/hesa/dta/T07_income.dta saved
+  123,600
+Saved 123600 rows: /Users/user/Dropbox/Akos/ukhe_data/hesa/dta/T07_income.dta
+Importing HESA table 8: /Users/user/Dropbox/Akos/ukhe_data/hesa/csv/table-8/tab
+> le-8-(2021-22).csv
+(file /var/folders/ch/kb7x45ys2fq6dcpfs379ph280000gp/T//St18749.000005 not
+    found)
+file /var/folders/ch/kb7x45ys2fq6dcpfs379ph280000gp/T//St18749.000005 saved
+    as .dta format
+Importing HESA table 8: /Users/user/Dropbox/Akos/ukhe_data/hesa/csv/table-8/tab
+> le-8-(2017-18).csv
+(variable financialyearend was str1, now str10 to accommodate using data's
+       values)
+(variable yearendmonth was str3, now str8 to accommodate using data's values)
+file /var/folders/ch/kb7x45ys2fq6dcpfs379ph280000gp/T//St18749.000005 saved
+    as .dta format
+Importing HESA table 8: /Users/user/Dropbox/Akos/ukhe_data/hesa/csv/table-8/tab
+> le-8-(2023-24).csv
+file /var/folders/ch/kb7x45ys2fq6dcpfs379ph280000gp/T//St18749.000005 saved
+    as .dta format
+Importing HESA table 8: /Users/user/Dropbox/Akos/ukhe_data/hesa/csv/table-8/tab
+> le-8-(2019-20).csv
+file /var/folders/ch/kb7x45ys2fq6dcpfs379ph280000gp/T//St18749.000005 saved
+    as .dta format
+Importing HESA table 8: /Users/user/Dropbox/Akos/ukhe_data/hesa/csv/table-8/tab
+> le-8-(2022-23).csv
+file /var/folders/ch/kb7x45ys2fq6dcpfs379ph280000gp/T//St18749.000005 saved
+    as .dta format
+Importing HESA table 8: /Users/user/Dropbox/Akos/ukhe_data/hesa/csv/table-8/tab
+> le-8-(2018-19).csv
+file /var/folders/ch/kb7x45ys2fq6dcpfs379ph280000gp/T//St18749.000005 saved
+    as .dta format
+Importing HESA table 8: /Users/user/Dropbox/Akos/ukhe_data/hesa/csv/table-8/tab
+> le-8-(2024-25).csv
+(variable countryofheprovider was str7, now str16 to accommodate using data's
+       values)
+file /var/folders/ch/kb7x45ys2fq6dcpfs379ph280000gp/T//St18749.000005 saved
+    as .dta format
+Importing HESA table 8: /Users/user/Dropbox/Akos/ukhe_data/hesa/csv/table-8/tab
+> le-8-(2015-16).csv
+(variable heprovider was str52, now str59 to accommodate using data's values)
+(variable financialyearend was str1, now str10 to accommodate using data's
+       values)
+(variable yearendmonth was str3, now str13 to accommodate using data's
+       values)
+(variable hesa_table was byte, now int to accommodate using data's values)
+(variable hesa_short_name was str11, now str40 to accommodate using data's
+       values)
+file /var/folders/ch/kb7x45ys2fq6dcpfs379ph280000gp/T//St18749.000005 saved
+    as .dta format
+Importing HESA table 8: /Users/user/Dropbox/Akos/ukhe_data/hesa/csv/table-8/tab
+> le-8-(2020-21).csv
+(variable heprovider was str52, now str59 to accommodate using data's values)
+(variable yearendmonth was str8, now str13 to accommodate using data's
+       values)
+(variable hesa_table was byte, now int to accommodate using data's values)
+(variable hesa_short_name was str11, now str40 to accommodate using data's
+       values)
+file /var/folders/ch/kb7x45ys2fq6dcpfs379ph280000gp/T//St18749.000005 saved
+    as .dta format
+Importing HESA table 8: /Users/user/Dropbox/Akos/ukhe_data/hesa/csv/table-8/tab
+> le-8-(2016-17).csv
+(variable heprovider was str52, now str59 to accommodate using data's values)
+(variable financialyearend was str1, now str10 to accommodate using data's
+       values)
+(variable yearendmonth was str3, now str13 to accommodate using data's
+       values)
+(variable hesa_table was byte, now int to accommodate using data's values)
+(variable hesa_short_name was str11, now str40 to accommodate using data's
+       values)
+file /var/folders/ch/kb7x45ys2fq6dcpfs379ph280000gp/T//St18749.000005 saved
+    as .dta format
+file /Users/user/Dropbox/Akos/ukhe_data/hesa/dta/T08_expenditure.dta saved
+  1,340,880
+Saved 1340880 rows: /Users/user/Dropbox/Akos/ukhe_data/hesa/dta/T08_expenditure
+> .dta
+Importing HESA table 11: /Users/user/Dropbox/Akos/ukhe_data/hesa/csv/table-11/t
+> able-11-(2020-21).csv
+(file /var/folders/ch/kb7x45ys2fq6dcpfs379ph280000gp/T//St18749.000006 not
+    found)
+file /var/folders/ch/kb7x45ys2fq6dcpfs379ph280000gp/T//St18749.000006 saved
+    as .dta format
+Importing HESA table 11: /Users/user/Dropbox/Akos/ukhe_data/hesa/csv/table-11/t
+> able-11-(2016-17).csv
+file /var/folders/ch/kb7x45ys2fq6dcpfs379ph280000gp/T//St18749.000006 saved
+    as .dta format
+Importing HESA table 11: /Users/user/Dropbox/Akos/ukhe_data/hesa/csv/table-11/t
+> able-11-(2018-19).csv
+file /var/folders/ch/kb7x45ys2fq6dcpfs379ph280000gp/T//St18749.000006 saved
+    as .dta format
+Importing HESA table 11: /Users/user/Dropbox/Akos/ukhe_data/hesa/csv/table-11/t
+> able-11-(2024-25).csv
+file /var/folders/ch/kb7x45ys2fq6dcpfs379ph280000gp/T//St18749.000006 saved
+    as .dta format
+Importing HESA table 11: /Users/user/Dropbox/Akos/ukhe_data/hesa/csv/table-11/t
+> able-11-(2015-16).csv
+file /var/folders/ch/kb7x45ys2fq6dcpfs379ph280000gp/T//St18749.000006 saved
+    as .dta format
+Importing HESA table 11: /Users/user/Dropbox/Akos/ukhe_data/hesa/csv/table-11/t
+> able-11-(2019-20).csv
+file /var/folders/ch/kb7x45ys2fq6dcpfs379ph280000gp/T//St18749.000006 saved
+    as .dta format
+Importing HESA table 11: /Users/user/Dropbox/Akos/ukhe_data/hesa/csv/table-11/t
+> able-11-(2022-23).csv
+file /var/folders/ch/kb7x45ys2fq6dcpfs379ph280000gp/T//St18749.000006 saved
+    as .dta format
+Importing HESA table 11: /Users/user/Dropbox/Akos/ukhe_data/hesa/csv/table-11/t
+> able-11-(2014-15).csv
+file /var/folders/ch/kb7x45ys2fq6dcpfs379ph280000gp/T//St18749.000006 saved
+    as .dta format
+Importing HESA table 11: /Users/user/Dropbox/Akos/ukhe_data/hesa/csv/table-11/t
+> able-11-(2017-18).csv
+file /var/folders/ch/kb7x45ys2fq6dcpfs379ph280000gp/T//St18749.000006 saved
+    as .dta format
+Importing HESA table 11: /Users/user/Dropbox/Akos/ukhe_data/hesa/csv/table-11/t
+> able-11-(2021-22).csv
+file /var/folders/ch/kb7x45ys2fq6dcpfs379ph280000gp/T//St18749.000006 saved
+    as .dta format
+Importing HESA table 11: /Users/user/Dropbox/Akos/ukhe_data/hesa/csv/table-11/t
+> able-11-(2023-24).csv
+file /var/folders/ch/kb7x45ys2fq6dcpfs379ph280000gp/T//St18749.000006 saved
+    as .dta format
+file /Users/user/Dropbox/Akos/ukhe_data/hesa/dta/T11_staff_fte.dta saved
+  2,174,568
+Saved 2174568 rows: /Users/user/Dropbox/Akos/ukhe_data/hesa/dta/T11_staff_fte.d
+> ta
+Importing HESA table 12: /Users/user/Dropbox/Akos/ukhe_data/hesa/csv/table-12.c
+> sv
+(file /var/folders/ch/kb7x45ys2fq6dcpfs379ph280000gp/T//St18749.000007 not
+    found)
+file /var/folders/ch/kb7x45ys2fq6dcpfs379ph280000gp/T//St18749.000007 saved
+    as .dta format
+file /Users/user/Dropbox/Akos/ukhe_data/hesa/dta/T12_staff_costs.dta saved
+  44,413
+Saved 44413 rows: /Users/user/Dropbox/Akos/ukhe_data/hesa/dta/T12_staff_costs.d
+> ta
+Importing HESA table 13: /Users/user/Dropbox/Akos/ukhe_data/hesa/csv/table-13.c
+> sv
+(file /var/folders/ch/kb7x45ys2fq6dcpfs379ph280000gp/T//St18749.000008 not
+    found)
+file /var/folders/ch/kb7x45ys2fq6dcpfs379ph280000gp/T//St18749.000008 saved
+    as .dta format
+file /Users/user/Dropbox/Akos/ukhe_data/hesa/dta/T13_severance.dta saved
+  23,172
+Saved 23172 rows: /Users/user/Dropbox/Akos/ukhe_data/hesa/dta/T13_severance.dta
+Importing HESA table 14: /Users/user/Dropbox/Akos/ukhe_data/hesa/csv/table-14.c
+> sv
+(file /var/folders/ch/kb7x45ys2fq6dcpfs379ph280000gp/T//St18749.000009 not
+    found)
+file /var/folders/ch/kb7x45ys2fq6dcpfs379ph280000gp/T//St18749.000009 saved
+    as .dta format
+file /Users/user/Dropbox/Akos/ukhe_data/hesa/dta/T14_kfi.dta saved
+  30,896
+Saved 30896 rows: /Users/user/Dropbox/Akos/ukhe_data/hesa/dta/T14_kfi.dta
+
+. 
+. di as text "Done. HESA DTA files are in `out_dir'."
+Done. HESA DTA files are in /Users/user/Dropbox/Akos/ukhe_data/hesa/dta.
+
+. 
+end of do-file

@@ -1,0 +1,43 @@
+
+# Large/private research data
+data/
+raw/
+raw-data/
+derived-data/
+processed-data/
+confidential/
+datasets/
+
+# Generated outputs
+output/
+outputs/
+results/
+figures/generated/
+tables/generated/
+
+# Large/binary formats
+*.zip
+*.tar
+*.tar.gz
+*.gz
+*.7z
+*.dta
+*.rds
+*.RData
+*.parquet
+*.feather
+*.sqlite
+*.db
+
+# Local environments and caches
+.venv/
+venv/
+__pycache__/
+.Rproj.user/
+renv/library/
+node_modules/
+
+# Local secrets and macOS files
+.env
+.DS_Store
+

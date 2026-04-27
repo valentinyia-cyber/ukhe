@@ -1,0 +1,227 @@
+
+  ___  ____  ____  ____  ____ ®
+ /__    /   ____/   /   ____/      StataNow 19.5
+___/   /   /___/   /   /___/       MP—Parallel Edition
+
+ Statistics and Data Science       Copyright 1985-2025 StataCorp LLC
+                                   StataCorp
+                                   4905 Lakeway Drive
+                                   College Station, Texas 77845 USA
+                                   800-782-8272        https://www.stata.com
+                                   979-696-4600        service@stata.com
+
+Stata license: Single-user 2-core , expiring  6 Jun 2028
+Serial number: 501909304107
+  Licensed to: Akos Valentinyi
+               University of Manchester
+
+Notes:
+      1. Stata is running in batch mode.
+      2. Unicode is supported; see help unicode_advice.
+      3. More than 2 billion observations are allowed; see help obs_advice.
+      4. Maximum number of variables is set to 5,000 but can be increased;
+          see help set_maxvar.
+
+. do /Users/user/Codes/ukhe/scripts/hesa_check_outputs.do 
+
+. version 16.0
+
+. clear all
+
+. set more off
+
+. 
+. * ---------------------------------------------------------------
+. * Quick checks for HESA DTA files created by hesa_convert_csv_to_dta.do
+. * ---------------------------------------------------------------
+. 
+. local hesa_dir "/Users/user/Dropbox/Akos/ukhe_data/hesa"
+
+. local out_dir "`hesa_dir'/dta"
+
+. 
+. local files "T01_students.dta T06_tuition_fees.dta T07_income.dta T08_expendi
+> ture.dta T11_staff_fte.dta T12_staff_costs.dta T13_severance.dta T14_kfi.dta"
+
+. 
+. local sort_1  "ukprn levelofstudy modeofstudy categorymarker category year"
+
+. local sort_6  "ukprn tuitionfeesandeducationcontracts v9 year"
+
+. local sort_7  "ukprn categorymarker category year"
+
+. local sort_8  "ukprn hesacostcentre academicdepartments activity year"
+
+. local sort_11 "ukprn contractmarker categorymarker category year"
+
+. local sort_12 "ukprn staffcosts unit year"
+
+. local sort_13 "ukprn categorymarker category year"
+
+. local sort_14 "ukprn kfiratiotitle year"
+
+. 
+. foreach f of local files {
+  2.     capture confirm file "`out_dir'/`f'"
+  3.     if _rc {
+  4.         di as error "`f'"
+  5.         di as error "  missing from `out_dir'"
+  6.         continue
+  7.     }
+  8. 
+.     use "`out_dir'/`f'", clear
+  9.     quietly count
+ 10.     local nrows = r(N)
+ 11.     local t = real(substr("`f'", 2, 2))
+ 12.     local sorted_by : sortedby
+ 13.     if "`sorted_by'" == "`sort_`t''" {
+ 14.         local sort_status "`sorted_by'"
+ 15.     }
+ 16.     else {
+ 17.         local sort_status "expected `sort_`t''; saved sort is `sorted_by'"
+ 18.     }
+ 19. 
+.     local year_status "missing"
+ 20.     capture confirm numeric variable year
+ 21.     if !_rc {
+ 22.         quietly summarize year, meanonly
+ 23.         local year_status "numeric, range `r(min)'-`r(max)'"
+ 24.     }
+ 25. 
+.     unab allvars : _all
+ 26.     local has_value : list posof "value" in allvars
+ 27.     local value_status "missing"
+ 28.     if `has_value' {
+ 29.         capture confirm numeric variable value
+ 30.         if !_rc {
+ 31.             local value_status "numeric"
+ 32.         }
+ 33.         else {
+ 34.             local value_status "present but not numeric"
+ 35.         }
+ 36.     }
+ 37. 
+.     local year_order_status "not checked"
+ 38.     capture confirm variable year
+ 39.     if !_rc {
+ 40.         capture confirm variable academicyear
+ 41.         if !_rc {
+ 42.             local i 0
+ 43.             local year_pos 0
+ 44.             local academicyear_pos 0
+ 45.             foreach v of varlist _all {
+ 46.                 local i = `i' + 1
+ 47.                 if "`v'" == "year" local year_pos `i'
+ 48.                 if "`v'" == "academicyear" local academicyear_pos `i'
+ 49.             }
+ 50.             if `year_pos' + 1 == `academicyear_pos' {
+ 51.                 local year_order_status "immediately before academicyear"
+ 52.             }
+ 53.             else {
+ 54.                 local year_order_status "year position `year_pos', academi
+> cyear position `academicyear_pos'"
+ 55.             }
+ 56.         }
+ 57.     }
+ 58. 
+.     capture confirm variable ukprn
+ 59.     if !_rc {
+ 60.         quietly levelsof ukprn, local(providers)
+ 61.         local nproviders : word count `providers'
+ 62.         capture assert ref2021_filter_applied == 1
+ 63.         if _rc {
+ 64.             local filter_status "mixed/unverified"
+ 65.         }
+ 66.         else {
+ 67.             local filter_status "REF2021 >1 UoA filter applied"
+ 68.         }
+ 69.     }
+ 70.     else {
+ 71.         local nproviders 0
+ 72.         local filter_status "no UKPRN in source; not provider-filtered"
+ 73.     }
+ 74. 
+.     di as text "`f'"
+ 75.     di as text "  rows: `nrows'"
+ 76.     di as text "  providers: `nproviders'"
+ 77.     di as text "  year: `year_status'"
+ 78.     di as text "  year order: `year_order_status'"
+ 79.     di as text "  value: `value_status'"
+ 80.     di as text "  sorted by: `sort_status'"
+ 81.     di as text "  status: `filter_status'"
+ 82. }
+(HESA table 1 (students), converted from CSV)
+T01_students.dta
+  rows: 4880610
+  providers: 129
+  year: numeric, range 2014-2024
+  year order: immediately before academicyear
+  value: numeric
+  sorted by: ukprn levelofstudy modeofstudy categorymarker category year
+  status: REF2021 >1 UoA filter applied
+(HESA table 6 (tuition_fees), converted from CSV)
+T06_tuition_fees.dta
+  rows: 433100
+  providers: 129
+  year: numeric, range 2016-2023
+  year order: immediately before academicyear
+  value: numeric
+  sorted by: ukprn tuitionfeesandeducationcontracts v9 year
+  status: REF2021 >1 UoA filter applied
+(HESA table 7 (income), converted from CSV)
+T07_income.dta
+  rows: 123600
+  providers: 129
+  year: numeric, range 2015-2023
+  year order: immediately before academicyear
+  value: numeric
+  sorted by: ukprn categorymarker category year
+  status: REF2021 >1 UoA filter applied
+(HESA table 8 (expenditure), converted from CSV)
+T08_expenditure.dta
+  rows: 1340880
+  providers: 129
+  year: numeric, range 2015-2023
+  year order: immediately before academicyear
+  value: numeric
+  sorted by: ukprn hesacostcentre academicdepartments activity year
+  status: REF2021 >1 UoA filter applied
+(HESA table 11 (staff_fte), converted from CSV)
+T11_staff_fte.dta
+  rows: 2174568
+  providers: 129
+  year: numeric, range 2014-2024
+  year order: immediately before academicyear
+  value: numeric
+  sorted by: ukprn contractmarker categorymarker category year
+  status: REF2021 >1 UoA filter applied
+(HESA table 12 (staff_costs), converted from CSV)
+T12_staff_costs.dta
+  rows: 44413
+  providers: 129
+  year: numeric, range 2016-2023
+  year order: immediately before academicyear
+  value: numeric
+  sorted by: ukprn staffcosts unit year
+  status: REF2021 >1 UoA filter applied
+(HESA table 13 (severance), converted from CSV)
+T13_severance.dta
+  rows: 23172
+  providers: 129
+  year: numeric, range 2016-2023
+  year order: immediately before academicyear
+  value: numeric
+  sorted by: ukprn categorymarker category year
+  status: REF2021 >1 UoA filter applied
+(HESA table 14 (kfi), converted from CSV)
+T14_kfi.dta
+  rows: 30896
+  providers: 129
+  year: numeric, range 2015-2023
+  year order: immediately before academicyear
+  value: numeric
+  sorted by: ukprn kfiratiotitle year
+  status: REF2021 >1 UoA filter applied
+
+. 
+end of do-file
