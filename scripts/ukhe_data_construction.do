@@ -16,11 +16,37 @@ set more off
 * - Restricted to REF2021 institutions with more than one submitted UoA
 * ---------------------------------------------------------------
 
-local hesa_dir "/Users/user/Dropbox/Akos/ukhe_data/hesa"
+local user = c(username)
+local hesa_dir "/Users/`user'/Dropbox/Akos/ukhe_data/hesa"
 local dta_dir "`hesa_dir'/dta"
-local ref_dir "/Users/user/Dropbox/Akos/ukhe_data/ref2021"
+local ref_dir "/Users/`user'/Dropbox/Akos/ukhe_data/ref2021"
 local out_dir "`hesa_dir'/outputs"
 capture mkdir "`out_dir'"
+
+capture program drop decode_labelled_vars
+program define decode_labelled_vars
+    foreach v in `0' {
+        capture confirm variable `v'
+        if _rc {
+            continue
+        }
+        capture confirm string variable `v'
+        if !_rc {
+            continue
+        }
+        local value_label : value label `v'
+        if "`value_label'" == "" {
+            continue
+        }
+        local var_label : variable label `v'
+        tempvar decoded
+        decode `v', gen(`decoded')
+        order `decoded', after(`v')
+        drop `v'
+        rename `decoded' `v'
+        label variable `v' "`var_label'"
+    }
+end
 
 local staff_dta "`dta_dir'/T11_staff_fte.dta"
 local students_dta "`dta_dir'/T01_students.dta"
@@ -43,6 +69,12 @@ tempfile staff_wide students_wide costs_wide ref2021
 * the same institution-year values.
 * ---------------------------------------------------------------
 use "`staff_dta'", clear
+decode_labelled_vars heprovider countryofheprovider regionofheprovider ///
+    academicyear contractmarker categorymarker category
+capture confirm variable heprovider
+if _rc {
+    decode ukprn, gen(heprovider)
+}
 keep if countryofheprovider == "All" & regionofheprovider == "All"
 
 keep ukprn ref2021_institution_name n_ref2021_uoas heprovider ///
@@ -85,6 +117,8 @@ save "`staff_wide'", replace
 * Student totals from HESA Table 1.
 * ---------------------------------------------------------------
 use "`students_dta'", clear
+decode_labelled_vars countryofheprovider regionofheprovider entrantmarker ///
+    levelofstudy modeofstudy categorymarker category academicyear
 keep if countryofheprovider == "All" & regionofheprovider == "All"
 keep if entrantmarker == "All"
 keep if modeofstudy == "All" & categorymarker == "Total" & category == "Total"
@@ -111,6 +145,7 @@ save "`students_wide'", replace
 * that range are kept in the final panel with missing cost variables.
 * ---------------------------------------------------------------
 use "`expenditure_dta'", clear
+decode_labelled_vars yearendmonth hesacostcentre academicdepartments activity
 keep if yearendmonth == "All"
 keep if hesacostcentre == "Total expenditure" ///
     & academicdepartments == "Total expenditure" ///

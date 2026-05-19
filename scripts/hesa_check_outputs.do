@@ -6,10 +6,11 @@ set more off
 * Quick checks for HESA DTA files created by hesa_convert_csv_to_dta.do
 * ---------------------------------------------------------------
 
-local hesa_dir "/Users/user/Dropbox/Akos/ukhe_data/hesa"
+local user = c(username)
+local hesa_dir "/Users/`user'/Dropbox/Akos/ukhe_data/hesa"
 local out_dir "`hesa_dir'/dta"
 
-local files "T01_students.dta T06_tuition_fees.dta T07_income.dta T08_expenditure.dta T11_staff_fte.dta T12_staff_costs.dta T13_severance.dta T14_kfi.dta"
+local files "T01_students.dta T06_tuition_fees.dta T07_income.dta T08_expenditure.dta T11_staff_fte.dta T12_staff_costs.dta T13_severance.dta T14_kfi.dta T28_nonuk_country_students.dta"
 
 local sort_1  "ukprn levelofstudy modeofstudy categorymarker category year"
 local sort_6  "ukprn tuitionfeesandeducationcontracts v9 year"
@@ -19,6 +20,7 @@ local sort_11 "ukprn contractmarker categorymarker category year"
 local sort_12 "ukprn staffcosts unit year"
 local sort_13 "ukprn categorymarker category year"
 local sort_14 "ukprn kfiratiotitle year"
+local sort_28 "ukprn levelofstudy modeofstudy regionofpermanentaddress countryofpermanentaddress year"
 
 foreach f of local files {
     capture confirm file "`out_dir'/`f'"

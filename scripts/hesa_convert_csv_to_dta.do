@@ -11,15 +11,42 @@ set more off
 *   with submissions in more than one Unit of Assessment.
 * ---------------------------------------------------------------
 
-local hesa_dir "/Users/user/Dropbox/Akos/ukhe_data/hesa"
+local user = c(username)
+local hesa_dir "/Users/`user'/Dropbox/Akos/ukhe_data/hesa"
 local csv_dir "`hesa_dir'/csv"
-local ref_dir "/Users/user/Dropbox/Akos/ukhe_data/ref2021"
+local ref_dir "/Users/`user'/Dropbox/Akos/ukhe_data/ref2021"
 local out_dir "`hesa_dir'/dta"
 capture mkdir "`out_dir'"
 global hesa_csv_dir "`csv_dir'"
 
 tempfile ref2021_multi_uoa
 global ref2021_multi_uoa_file "`ref2021_multi_uoa'"
+
+tempfile russell_group_providers
+global russell_group_file "`russell_group_providers'"
+
+capture confirm file "`csv_dir'/russell_list.csv"
+if !_rc {
+    import delimited using "`csv_dir'/russell_list.csv", varnames(1) clear ///
+        bindquote(strict) encoding("UTF-8")
+    keep ukprn russell
+    destring ukprn, replace ignore(",") force
+    gen byte russellgroup = inlist(strlower(ustrtrim(itrim(russell))), "true", "1", "yes", "y")
+    keep ukprn russellgroup
+    duplicates drop ukprn, force
+    label variable russellgroup "Russell Group member"
+    compress
+    save "`russell_group_providers'", replace
+}
+else {
+    clear
+    set obs 0
+    gen long ukprn = .
+    gen byte russellgroup = .
+    label variable russellgroup "Russell Group member"
+    save "`russell_group_providers'", replace
+    di as error "Warning: missing Russell Group provider list: `csv_dir'/russell_list.csv"
+}
 
 * Prefer the already-created REF2021 institution x UoA file.
 capture confirm file "`ref_dir'/ref2021_uoa_indicators.dta"
@@ -129,10 +156,14 @@ program define import_hesa_csv
         }
 
         merge m:1 ukprn using "$ref2021_multi_uoa_file", keep(match) nogen
+        merge m:1 ukprn using "$russell_group_file", keep(master match) nogen
+        replace russellgroup = 0 if missing(russellgroup)
         gen byte ref2021_filter_applied = 1
         label variable ref2021_filter_applied "Rows restricted to REF2021 institutions with >1 UoA"
     }
     else {
+        gen byte russellgroup = .
+        label variable russellgroup "Russell Group member"
         gen byte ref2021_filter_applied = 0
         label variable ref2021_filter_applied "No UKPRN in source CSV; REF2021 filter not applied"
         di as error "Warning: no UKPRN column in `using'; saved without REF2021 provider filtering."
@@ -143,7 +174,10 @@ program define import_hesa_csv
     compress
 end
 
-local tables "1 6 7 8 11 12 13 14"
+local tables "1 6 7 8 11 12 13 14 28"
+if `"`0'"' != "" {
+    local tables `"`0'"'
+}
 
 local short_1  "students"
 local short_6  "tuition_fees"
@@ -153,6 +187,7 @@ local short_11 "staff_fte"
 local short_12 "staff_costs"
 local short_13 "severance"
 local short_14 "kfi"
+local short_28 "nonuk_country_students"
 
 local sort_1  "ukprn levelofstudy modeofstudy categorymarker category year"
 local sort_6  "ukprn tuitionfeesandeducationcontracts v9 year"
@@ -162,6 +197,7 @@ local sort_11 "ukprn contractmarker categorymarker category year"
 local sort_12 "ukprn staffcosts unit year"
 local sort_13 "ukprn categorymarker category year"
 local sort_14 "ukprn kfiratiotitle year"
+local sort_28 "ukprn levelofstudy modeofstudy regionofpermanentaddress countryofpermanentaddress year"
 
 local order_1  "modeofstudy categorymarker category year"
 local order_6  "year"
@@ -171,6 +207,7 @@ local order_11 "year"
 local order_12 "staffcosts unit year"
 local order_13 "categorymarker category year"
 local order_14 "kfiratiotitle year"
+local order_28 "levelofstudy modeofstudy regionofpermanentaddress countryofpermanentaddress year"
 
 local value_source_1  "number"
 local value_source_6  "value000s"
@@ -180,12 +217,13 @@ local value_source_11 "number"
 local value_source_12 "numbervalue"
 local value_source_13 "value000s"
 local value_source_14 "valueratio"
+local value_source_28 "number"
 
 foreach t of local tables {
     local short "`short_`t''"
     local table_id : display %02.0f `t'
 
-    if inlist(`t', 1, 8, 11) {
+    if inlist(`t', 1, 8, 11, 28) {
         local table_dir "`csv_dir'/table-`t'"
         local files : dir "`table_dir'" files "*.csv"
     }
